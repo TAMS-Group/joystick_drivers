@@ -94,7 +94,7 @@ private:
     }
     else
     {
-      stat.summary(2, "Joystick not open.");
+      stat.summary(1, "Joystick not open.");
     }
 
     stat.add("topic", pub_.getTopic());

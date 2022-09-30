@@ -29,7 +29,7 @@
   <depend>bluez</depend>
   <depend>diagnostic_msgs</depend>
   <depend>joystick</depend>
-  <depend>libusb-dev</depend>
+  <depend>libusb-1.0-dev</depend>
   <depend>python3-bluez</depend>
   <depend>rosgraph</depend>
   <depend>rospy</depend>

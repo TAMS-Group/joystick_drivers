@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.5)
 project(ps3joy)
 
 find_package(PkgConfig REQUIRED)
-pkg_search_module(LIBUSB REQUIRED libusb)
+pkg_search_module(LIBUSB REQUIRED libusb-1.0)
 
 if(LIBUSB_FOUND)
   include_directories(SYSTEM ${LIBUSB_INCLUDE_DIRS})
@@ -24,7 +24,7 @@ roslint_python(
 
 include_directories(${catkin_INCLUDE_DIRS})
 add_executable(sixpair src/sixpair.c)
-target_link_libraries(sixpair -lusb ${catkin_LIBRARIES})
+target_link_libraries(sixpair ${LIBUSB_LIBRARIES} ${catkin_LIBRARIES})
 
 if(CATKIN_ENABLE_TESTING)
   roslint_add_test()

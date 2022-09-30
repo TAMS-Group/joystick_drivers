@@ -30,7 +30,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdio.h>
-#include <usb.h>
+#include <stdlib.h>
+#include <libusb.h>
 
 #define VENDOR 0x054c
 #define PRODUCT 0x0268
@@ -40,41 +41,42 @@
 
 void fatal(char *msg) { perror(msg); exit(1); }
 
-void show_master(usb_dev_handle *devh, int itfnum) {
+void show_master(libusb_device_handle *devh, int itfnum) {
   printf("Current Bluetooth master: ");
   unsigned char msg[8];
-  int res = usb_control_msg
-    (devh, USB_DIR_IN | USB_TYPE_CLASS | USB_RECIP_INTERFACE,
+  int res = libusb_control_transfer
+    (devh, USB_DIR_IN | LIBUSB_REQUEST_TYPE_CLASS | LIBUSB_RECIPIENT_INTERFACE,
      0x01, 0x03f5, itfnum, (void*)msg, sizeof(msg), 5000);
   if ( res < 0 ) { perror("USB_REQ_GET_CONFIGURATION"); return; }
   printf("%02x:%02x:%02x:%02x:%02x:%02x\n",
 	 msg[2], msg[3], msg[4], msg[5], msg[6], msg[7]);
 }
 
-void set_master(usb_dev_handle *devh, int itfnum, int mac[6]) {
+void set_master(libusb_device_handle *devh, int itfnum, int mac[6]) {
   printf("Setting master bd_addr to %02x:%02x:%02x:%02x:%02x:%02x\n",
 	 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
   char msg[8]= { 0x01, 0x00, mac[0],mac[1],mac[2],mac[3],mac[4],mac[5] };
-  int res = usb_control_msg
+  int res = libusb_control_transfer
     (devh,
-     USB_DIR_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE,
+     USB_DIR_OUT | LIBUSB_REQUEST_TYPE_CLASS | LIBUSB_RECIPIENT_INTERFACE,
      0x09,
      0x03f5, itfnum, msg, sizeof(msg),
      5000);
   if ( res < 0 ) fatal("USB_REQ_SET_CONFIGURATION");
 }
 
-void process_device(int argc, char **argv, struct usb_device *dev,
-		    struct usb_config_descriptor *cfg, int itfnum) {
+void process_device(int argc, char **argv, struct libusb_device *dev,
+		    struct libusb_config_descriptor *cfg, int itfnum) {
   int mac[6];
 
-  usb_dev_handle *devh = usb_open(dev);
-  if ( ! devh ) fatal("usb_open");
+  libusb_device_handle *devh;
+  libusb_open(dev, &devh);
+  if ( ! devh ) fatal("libusb_open");
 
-  usb_detach_kernel_driver_np(devh, itfnum);
+  libusb_detach_kernel_driver(devh, itfnum);
 
-  int res = usb_claim_interface(devh, itfnum);
-  if ( res < 0 ) fatal("usb_claim_interface");
+  int res = libusb_claim_interface(devh, itfnum);
+  if ( res < 0 ) fatal("libusb_claim_interface");
 
   show_master(devh, itfnum);
 
@@ -99,45 +101,41 @@ void process_device(int argc, char **argv, struct usb_device *dev,
     
   set_master(devh, itfnum, mac);
 
-  usb_close(devh);
+  libusb_close(devh);
 }
 
 int main(int argc, char *argv[]) {  
-
-  usb_init();
-  if ( usb_find_busses() < 0 ) fatal("usb_find_busses");
-  if ( usb_find_devices() < 0 ) fatal("usb_find_devices");
-  struct usb_bus *busses = usb_get_busses();
-  if ( ! busses ) fatal("usb_get_busses");
+  libusb_context* usb_ctx;
+  libusb_init(&usb_ctx);
 
   int found = 0;
 
-  struct usb_bus *bus;
-  for ( bus=busses; bus; bus=bus->next ) {
-    struct usb_device *dev;
-    for ( dev=bus->devices; dev; dev=dev->next) {
-      struct usb_config_descriptor *cfg;
-      for ( cfg = dev->config;
-	    cfg < dev->config + dev->descriptor.bNumConfigurations;
-	    ++cfg ) {
-	int itfnum;
-	for ( itfnum=0; itfnum<cfg->bNumInterfaces; ++itfnum ) {
-	  struct usb_interface *itf = &cfg->interface[itfnum];
-	  struct usb_interface_descriptor *alt;
-	  for ( alt = itf->altsetting;
-		alt < itf->altsetting + itf->num_altsetting;
-		++alt ) {
-	    if ( dev->descriptor.idVendor == VENDOR &&
-		 dev->descriptor.idProduct == PRODUCT &&
-		 alt->bInterfaceClass == 3 ) {
-	      process_device(argc, argv, dev, cfg, itfnum);
-	      ++found;
-	    }
-	  }
-	}
+  libusb_device** dev_list;
+  ssize_t device_count = libusb_get_device_list(usb_ctx, &dev_list);
+
+  for ( size_t i = 0; i < device_count; ++i) {
+    libusb_device* dev = dev_list[i];
+    struct libusb_device_descriptor desc;
+    libusb_get_device_descriptor(dev, &desc);
+    if ( desc.idVendor == VENDOR && desc.idProduct == PRODUCT ) {
+      for ( uint8_t j = 0; j < desc.bNumConfigurations; ++j ){
+        struct libusb_config_descriptor* cfg;
+        libusb_get_config_descriptor(dev, j, &cfg);
+        for ( size_t k = 0; k < cfg->bNumInterfaces; ++k ){
+          const struct libusb_interface* iface = &(cfg->interface[k]);
+          for ( int l = 0; l < iface->num_altsetting; ++l ){
+            if (iface->altsetting[l].bInterfaceClass == LIBUSB_CLASS_HID) {
+              process_device(argc, argv, dev, cfg, k);
+              ++found;
+            }
+          }
+        }
+        libusb_free_config_descriptor(cfg);
       }
     }
   }
+
+  libusb_free_device_list(dev_list, 1);
 
   if ( ! found ) {
     printf("No controller found on USB busses. Please connect your joystick via USB.\n");
